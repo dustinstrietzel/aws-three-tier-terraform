@@ -1,0 +1,18 @@
+# Terraform state — contains secrets in plain text. Never commit.
+*.tfstate
+*.tfstate.*
+
+# Provider binaries — large and re-downloadable with `terraform init`.
+.terraform/
+
+# Variable files — commonly hold passwords and keys.
+*.tfvars
+*.tfvars.json
+
+# Saved plans — can contain sensitive values.
+tfplan
+*.tfplan
+
+# Crash logs
+crash.log
+crash.*.log
