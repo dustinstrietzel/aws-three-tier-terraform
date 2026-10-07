@@ -78,6 +78,10 @@ resource "aws_route_table_association" "public_b" {
 }
 resource "aws_route_table" "private_a" {
   vpc_id = aws_vpc.projecttf.id
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat_a.id
+  }
 
   tags = {
     Name = "private-a-rt"
@@ -85,6 +89,10 @@ resource "aws_route_table" "private_a" {
 }
 resource "aws_route_table" "private_b" {
   vpc_id = aws_vpc.projecttf.id
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.nat_b.id
+  }
 
   tags = {
     Name = "private-b-rt"
@@ -97,4 +105,56 @@ resource "aws_route_table_association" "private_a" {
 resource "aws_route_table_association" "private_b" {
   subnet_id      = aws_subnet.private_b.id
   route_table_id = aws_route_table.private_b.id
+}
+
+resource "aws_eip" "nat_a" {
+  domain = "vpc"
+
+  tags = {
+    Name = "nat-a"
+  }
+}
+resource "aws_eip" "nat_b" {
+  domain = "vpc"
+
+  tags = {
+    Name = "nat-b"
+  }
+}
+
+resource "aws_nat_gateway" "nat_a" {
+  allocation_id = aws_eip.nat_a.id
+  subnet_id     = aws_subnet.public_a.id
+  depends_on    = [aws_internet_gateway.gw]
+
+
+  tags = {
+    Name = "gw NAT-a"
+  }
+}
+resource "aws_nat_gateway" "nat_b" {
+  allocation_id = aws_eip.nat_b.id
+  subnet_id     = aws_subnet.public_b.id
+  depends_on    = [aws_internet_gateway.gw]
+
+
+  tags = {
+    Name = "gw NAT-b"
+  }
+}
+
+# Storage
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id       = aws_vpc.projecttf.id
+  service_name = "com.amazonaws.us-east-1.s3"
+  route_table_ids = [
+    aws_route_table.private_a.id,
+    aws_route_table.private_b.id,
+  ]
+  vpc_endpoint_type = "Gateway"
+  tags = {
+    Name = "s3-vpc-endpoint"
+  }
+
 }
