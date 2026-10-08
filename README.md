@@ -24,3 +24,4 @@ built entirely with Terraform.
   ** Security groups - Load balancer will listen on Port 80, not 443 - I do not have a domain for a TLS Certificate. 
                      - The DB does not get an outbound rule, since it does not need to initiate communication - Least Proivoledge. 
                      - Security groups reference eachother everywhere the other end is inside the design. Outbound from the application tier is the one exception because the destinations are public and can't be enumerated - this is acceptable because security groups are stateful and the application tier has no inbound path from the internet. 
+  ** Created a separate Terraform folder to create and manage an S3 bucket. The purpose was to remote access my state file, including version control, encryption and public access blocking. Added to main TF folder as backend for storage. 
