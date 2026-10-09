@@ -159,6 +159,7 @@ resource "aws_vpc_endpoint" "s3" {
 
 }
 
+#Security Groups
 resource "aws_security_group" "alb" {
   name        = "alb-sg"
   description = "Load balancer: accepts HTTP from the internet"
@@ -222,4 +223,36 @@ resource "aws_vpc_security_group_ingress_rule" "db_in_from_app" {
   from_port                    = 5432
   ip_protocol                  = "tcp"
   to_port                      = 5432
+}
+
+#Load Balancer
+resource "aws_lb" "main" {
+  name               = "three-tier-app-lb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
+
+  enable_deletion_protection = false
+
+
+  tags = {
+    Name = "three-tier-app-lb"
+  }
+}
+resource "aws_lb_target_group" "app" {
+  name     = "three-tier-app-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.projecttf.id
+}
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app.arn
+  }
 }
