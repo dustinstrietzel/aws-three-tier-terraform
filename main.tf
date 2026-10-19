@@ -256,3 +256,39 @@ resource "aws_lb_listener" "http" {
     target_group_arn = aws_lb_target_group.app.arn
   }
 }
+resource "aws_launch_template" "app" {
+  name                   = "three-tier-app-lt"
+  image_id               = data.aws_ami.al2023.id
+  instance_type          = "t3.micro"
+  vpc_security_group_ids = [aws_security_group.app.id]
+  user_data = base64encode(<<-EOF
+#!/bin/bash
+dnf install -y httpd
+systemctl enable --now httpd
+echo "<h1>Hello from $(hostname)</h1>" > /var/www/html/index.html
+EOF
+  )
+  tag_specifications {
+    resource_type = "instance"
+
+    tags = {
+      Name = "three-tier-app-instance"
+    }
+  }
+}
+
+resource "aws_autoscaling_group" "app" {
+  name                      = "three-tier-app-asg"
+  max_size                  = 4
+  min_size                  = 2
+  health_check_grace_period = 300
+  health_check_type         = "ELB"
+  desired_capacity          = 2
+  launch_template {
+    id      = aws_launch_template.app.id
+    version = "$Latest"
+  }
+  vpc_zone_identifier = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  target_group_arns   = [aws_lb_target_group.app.arn]
+}
+

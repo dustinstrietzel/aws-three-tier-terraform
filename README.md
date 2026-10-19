@@ -25,3 +25,7 @@ built entirely with Terraform.
                      - The DB does not get an outbound rule, since it does not need to initiate communication - Least Proivoledge. 
                      - Security groups reference eachother everywhere the other end is inside the design. Outbound from the application tier is the one exception because the destinations are public and can't be enumerated - this is acceptable because security groups are stateful and the application tier has no inbound path from the internet. 
   ** Created a separate Terraform folder to create and manage an S3 bucket. The purpose was to remote access my state file, including version control, encryption and public access blocking. Added to main TF folder as backend for storage. 
+  ** Autoscaling Group - Currently only need 1 instance - set minimum of 2 due to there being two AZ's. If there were two instances, setting minimum to 1 would allow a scaling policy to scale to 1, eliminating the multi-zone benefit the rest of the architecture is created for. 
+  ** Health Check - sent to ELB - Default is "EC2" which would miss an issue with the app if the instance was healthy but the app failed. 
+  ** AMI - Data source to allow current versions with updates. Filtered by owner for security (AWS created images).
+  ** Set extended grace period to allow instance to boot with user data without autoscaling attempting to replace the instance while it was booting, eliminating the launch/terminate loop. 
