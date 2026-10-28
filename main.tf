@@ -263,6 +263,7 @@ resource "aws_launch_template" "app" {
   vpc_security_group_ids = [aws_security_group.app.id]
   user_data = base64encode(<<-EOF
 #!/bin/bash
+set -e
 dnf install -y httpd
 systemctl enable --now httpd
 echo "<h1>Hello from $(hostname)</h1>" > /var/www/html/index.html

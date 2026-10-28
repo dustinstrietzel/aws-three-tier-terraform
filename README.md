@@ -16,7 +16,7 @@ Under test, terminating an application instance by hand left the site serving co
 
 - The application and database tiers can reach the internet outbound, for package updates, but have no inbound path from it. One NAT gateway per zone, and S3 traffic bypasses it entirely through a gateway endpoint.
 
-- Three security groups, one per tier. Each tier's inbound rule names the security group above it rather than an address range, so the only way to reach the application instances is through the load balancer, and the only way to reach the database is through an application instance. Because instances are created and destroyed constantly, there is no address list to keep up to date and no window where a stale rule still allows traffic.
+- Three security groups, one per tier. Each tier's inbound rule names the security group above it rather than an address range, so the only way to reach the application instances is through the load balancer, and the only way to reach the database is through an application instance. Naming the group rather than a range means the rule describes what a resource *is* rather than where it sits. Anything added to the private subnets later does not inherit database access simply by having an address there, and the rules do not go stale when the addressing changes.
 
 - An internet-facing Application Load Balancer with a listener on port 80 and a target group — one stable public address for a set of servers that keeps changing. The load balancer withholds traffic from any instance that stops answering.
 
