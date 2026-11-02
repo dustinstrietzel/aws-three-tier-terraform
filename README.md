@@ -24,9 +24,10 @@ Under test, terminating an application instance by hand left the site serving co
 
 - Terraform state held in S3 — encrypted, versioned, and locked against concurrent runs — created and managed by a separate Terraform project in `bootstrap/`.
 
+- An RDS PostgreSQL database in the private subnets, deployed Multi-AZ, holding the application’s working data. It is reachable only from the application tier, and not from the internet at all.
+
 ### Not built yet
 
-- **RDS PostgreSQL database** — in the private subnets, holding the application's data so it outlives any individual instance. Deployed Multi-AZ, so AWS keeps a standby in the other Availability Zone and fails over to it automatically. The standby is not readable; Multi-AZ buys availability, not read capacity.
 
 - **S3 uploads bucket** — to allow uploads from any instance, including ones that do not exist yet, with durable and shared storage, reached through the gateway endpoint rather than the NAT gateways. An IAM role attached to the instances lets them write to the bucket without any access keys on the servers.
 
@@ -64,7 +65,7 @@ Under test, terminating an application instance by hand left the site serving co
  │                                  ▼              │              │
  │                    ┌─────────────────────────┐  │              │
  │                    │  RDS  PostgreSQL        │  │              │
- │                    │  Multi-AZ    (PLANNED)  │  │              │
+ │                    │  Multi-AZ               │  │              │
  │                    └─────────────────────────┘  │              │
  └─────────────────────────────────────────────────┼──────────────┘
                                                    │ S3 gateway
@@ -108,15 +109,40 @@ The user's connection terminates at the load balancer, which opens its own separ
 
 - **An extended health check grace period.** A new instance is correctly unhealthy while its user data installs a web server. Acting on that immediately would terminate it for failing a check it had not had time to pass, and do the same to its replacement — a launch-terminate loop.
 
+### Database
+
+- **A database for the application's working data, and a bucket for uploaded files.** They answer
+  different kinds of request. A bucket hands back a whole object when you ask for it by name. A
+  database answers questions that have to be worked out from the data — "this customer's last ten
+  orders, newest first" — and it handles several requests changing the same record at once, where
+  S3 would replace the whole object and let the last write win.
+
+- **Multi-AZ, which buys availability and not read capacity.** AWS keeps a standby copy in the
+  other Availability Zone and fails over to it automatically. The standby cannot be read from — it
+  is not a read replica — so this does nothing for query throughput. It roughly doubles the database
+  cost, which is the honest price of the same zone independence the two NAT gateways pay for
+  elsewhere.
+
 ### State
 
 - **A separate Terraform project in `bootstrap/` creates and manages the S3 state bucket**, with versioning, encryption and public access blocking. Keeping it separate means `terraform destroy` in the main project cannot delete the bucket holding its own state.
+
+- **The password comes from a variable marked `sensitive`, supplied through an environment variable
+  rather than a file.** `sensitive` only hides the value from Terraform's output — the password is
+  written into the state file in plain text regardless. That is the concrete reason the state bucket
+  is encrypted, versioned and blocked from public access.
 
 ### Terraform practice
 
 - **`depends_on` on the NAT gateways.** Nothing in a NAT gateway block references the internet gateway, so Terraform's dependency graph has no reason to wait for it. This is the rare case where an explicit dependency is genuinely needed.
 
 - **`vpc_endpoint_type = "Gateway"` written explicitly**, even though it is the default. That argument decides whether the endpoint is a free route table entry or a billed network interface — worth stating when a default changes the nature and cost of a resource rather than just a setting on it.
+
+- **No deletion protection, no `prevent_destroy`, and `skip_final_snapshot = true`.** In production
+  both guards would be on and nobody would run `terraform destroy`. Here the destroy *is* the
+  operation — this stack is built and torn down every session — so a guard against teardown is a
+  guard against me. `prevent_destroy` would be worse than inconvenient: it fails the whole plan, so
+  nothing gets destroyed and the load balancer and NAT gateways keep billing.
 
 ---
 

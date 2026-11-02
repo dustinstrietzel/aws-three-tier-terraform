@@ -293,3 +293,36 @@ resource "aws_autoscaling_group" "app" {
   target_group_arns   = [aws_lb_target_group.app.arn]
 }
 
+resource "aws_db_subnet_group" "three-tier-app-db-subnets" {
+  name       = "three-tier-app-db-subnets"
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+
+  tags = {
+    Name = "Main DB subnet group"
+  }
+}
+
+resource "aws_db_instance" "three_tier_app_db" {
+  allocated_storage      = 20
+  db_name                = "appdb"
+  identifier             = "three-tier-app-db"
+  engine                 = "postgres"
+  instance_class         = "db.t3.micro"
+  username               = "appadmin"
+  password               = var.db_password
+  vpc_security_group_ids = [aws_security_group.db.id]
+  multi_az               = true
+  publicly_accessible    = false
+  skip_final_snapshot    = true
+  db_subnet_group_name   = aws_db_subnet_group.three-tier-app-db-subnets.name
+}
+
+variable "db_password" {
+  description = "Master password for the RDS PostgreSQL instance"
+  type        = string
+  sensitive   = true
+}
+
+output "db_endpoint" {
+  value = aws_db_instance.three_tier_app_db.endpoint
+}
