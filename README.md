@@ -146,6 +146,7 @@ The user's connection terminates at the load balancer, which opens its own separ
 
 ---
 
+
 ## Running it
 
 Requires Terraform and AWS credentials configured locally.
@@ -157,10 +158,17 @@ terraform apply
 
 cd ..            # the application itself
 terraform init
+
+export TF_VAR_db_password='choose-something'   # PowerShell: $env:TF_VAR_db_password = 'choose-something'
 terraform apply
 ```
 
-`terraform apply` from an empty AWS account produces a working, publicly reachable site. There are no manual steps at any point. The load balancer's address is printed as an output:
+The database password is deliberately not in this repository, and there is no default for it — Terraform
+will refuse to run without a value. `TF_VAR_` followed by the variable name is how Terraform picks up any
+variable from the environment.
+
+`terraform apply` from an empty AWS account produces a working, publicly reachable site. The only thing not
+in the repository is the database password. The load balancer's address is printed as an output:
 
 ```
 alb_dns_name = "three-tier-app-lb-1234567890.us-east-1.elb.amazonaws.com"
@@ -172,10 +180,15 @@ The backend block in `provider.tf` points at my state bucket, which you cannot w
 
 ### Cost
 
-Roughly **14 cents an hour** while running, in `us-east-1` — two NAT gateways, the load balancer, and two `t3.micro` instances. The NAT gateways are the largest item and they bill by the hour whether anything uses them or not.
+Roughly **18 cents an hour** while running, in `us-east-1` — two NAT gateways, the Application Load
+Balancer, two `t3.micro` instances, and a Multi-AZ `db.t3.micro` database. The NAT gateways and the
+database are the largest items, and both bill by the hour whether anything uses them or not.
+
+Multi-AZ roughly doubles the database cost, because the standby is a second instance with its own storage.
 
 ```bash
 terraform destroy
 ```
 
-The state bucket in `bootstrap/` is deliberately left running; it costs a few cents a month and holds the state for everything else.
+The state bucket in `bootstrap/` is deliberately left running; it costs a few cents a month and holds the
+state for everything else.

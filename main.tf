@@ -323,6 +323,4 @@ variable "db_password" {
   sensitive   = true
 }
 
-output "db_endpoint" {
-  value = aws_db_instance.three_tier_app_db.endpoint
-}
+
