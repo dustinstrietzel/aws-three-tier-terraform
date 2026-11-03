@@ -32,10 +32,8 @@ Under test, stopping the web server on one instance — leaving the instance its
 - Shell access to the private instances through SSM Session Manager. There is no SSH key
   pair, no bastion host, and no inbound rule on port 22 anywhere in the design.
 
-### Not built yet
-
-
-- **CloudWatch alarms** — to cover what the automation cannot resolve on its own. The load balancer withholds traffic and the Auto Scaling group replaces instances, but neither tells anyone, so without alarms there is potential for silently unresolved issues.
+- Four alarms delivered to email through an SNS topic: sustained unhealthy instances, database free
+  storage running low, 5xx responses from the load balancer, and a monthly cost budget.
 
 ---
 
@@ -172,7 +170,27 @@ Tested by stopping the web server rather than terminating the instance: terminat
   operation — this stack is built and torn down every session — so a guard against teardown is a
   guard against me. `prevent_destroy` would be worse than inconvenient: it fails the whole plan, so
   nothing gets destroyed and the load balancer and NAT gateways keep billing.
+  
+  ### Observability
 
+  - **Alarms exist because the automation is silent.** The load balancer withholds traffic from a failed
+  instance and the Auto Scaling group replaces it, and neither tells anyone. A memory leak killing the
+  web server every forty minutes would churn instances all night with the site technically up and nobody
+  aware of it.
+
+- **The unhealthy-instance alarm waits five minutes before firing.** A measured replacement takes about
+  four minutes to reach a healthy state, so anything shorter fires on every routine replacement — and an
+  alarm that cries wolf gets filtered into a folder nobody reads. The threshold comes from a number I
+  measured rather than a default.
+
+- **The load balancer's 5xx alarm fires on a single error.** With two instances, the load balancer only
+  returns 5xx when it has no healthy target at all, which means both are down. That is not a condition
+  worth tolerating, so the threshold is one.
+
+- **Cost monitoring is an AWS Budget rather than a CloudWatch billing alarm.** Billing metrics exist in
+  one Region only, update every six hours, and require billing alerts to be switched on by hand in the
+  account settings. A budget needs no console step and can alarm on a forecast rather than waiting until
+  the money is already spent.
 ---
 
 
@@ -188,16 +206,26 @@ terraform apply
 cd ..            # the application itself
 terraform init
 
-export TF_VAR_db_password='choose-something'   # PowerShell: $env:TF_VAR_db_password = 'choose-something'
+export TF_VAR_db_password='choose-something'
+export TF_VAR_alert_email='you@example.com'
+# PowerShell: $env:TF_VAR_db_password = '...' and $env:TF_VAR_alert_email = '...'
+
 terraform apply
 ```
 
-The database password is deliberately not in this repository, and there is no default for it — Terraform
-will refuse to run without a value. `TF_VAR_` followed by the variable name is how Terraform picks up any
+Neither the database password nor the alert email address is in this repository, and neither has a default —
+Terraform refuses to run without both. `TF_VAR_` followed by the variable name is how Terraform picks up any
 variable from the environment.
 
-`terraform apply` from an empty AWS account produces a working, publicly reachable site. The only thing not
-in the repository is the database password. The load balancer's address is printed as an output:
+The email address is a variable for a different reason than the password. It is not a secret; it simply is not
+a property of the infrastructure. Anyone running this needs their own, the same way they need their own state
+bucket.
+
+After the apply, AWS sends a confirmation link for the SNS email subscription. **It has to be clicked before
+any alarm email will arrive** — Terraform cannot confirm it.
+
+`terraform apply` from an empty AWS account produces a working, publicly reachable site. The load balancer's
+address is printed as an output:
 
 ```
 alb_dns_name = "three-tier-app-lb-1234567890.us-east-1.elb.amazonaws.com"

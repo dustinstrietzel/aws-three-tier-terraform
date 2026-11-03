@@ -380,3 +380,83 @@ resource "aws_iam_instance_profile" "app" {
   name = "three-tier-app-instance-profile"
   role = aws_iam_role.app.name
 }
+
+#Cloudwatch
+
+resource "aws_sns_topic" "three-tier-app-alerts" {
+  name = "three-tier-app-alerts"
+}
+
+resource "aws_sns_topic_subscription" "user_updates_to_email" {
+  topic_arn = aws_sns_topic.three-tier-app-alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_cloudwatch_metric_alarm" "three-tier-elb-alarm" {
+  alarm_name          = "three-tier-elb-alarm"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 5
+  metric_name         = "UnHealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 0
+  dimensions = {
+    LoadBalancer = aws_lb.main.arn_suffix
+    TargetGroup  = aws_lb_target_group.app.arn_suffix
+  }
+  alarm_description = "This metric monitors the number of unhealthy hosts in the Application ELB"
+  alarm_actions     = [aws_sns_topic.three-tier-app-alerts.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "three-tier-rds-alarm" {
+  alarm_name          = "three-tier-rds-alarm"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "FreeStorageSpace"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 4 * 1024 * 1024 * 1024
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.three_tier_app_db.identifier
+  }
+  alarm_description = "This metric monitors the free storage space in the RDS instance"
+  alarm_actions     = [aws_sns_topic.three-tier-app-alerts.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "three-tier-elb-5xx-alarm" {
+  alarm_name          = "three-tier-elb-5xx-alarm"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 2
+  metric_name         = "HTTPCode_ELB_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1
+  dimensions = {
+    LoadBalancer = aws_lb.main.arn_suffix
+  }
+  alarm_description = "This metric monitors the number of 5XX errors in the Application ELB"
+  alarm_actions     = [aws_sns_topic.three-tier-app-alerts.arn]
+}
+
+
+#Budget
+
+resource "aws_budgets_budget" "three-tier-app-budget" {
+  name         = "three-tier-app-budget"
+  budget_type  = "COST"
+  limit_amount = "20"
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    notification_type          = "FORECASTED"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    subscriber_email_addresses = [var.alert_email]
+  }
+}
+
