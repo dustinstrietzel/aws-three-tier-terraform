@@ -4,7 +4,7 @@ A load-balanced web application in a custom VPC spanning two Availability Zones,
 
 Three tiers: a public load balancer, application servers in an Auto Scaling group, and a database. **Each tier can only be reached by the tier directly above it.** The internet reaches only the load balancer; the load balancer reaches only the application instances; the application reaches only the database. The application and database tiers have no route in from the internet at all.
 
-Under test, terminating an application instance by hand left the site serving continuously, and its replacement reached a healthy state in about four minutes.
+Under test, stopping the web server on one instance — leaving the instance itself running — caused the Auto Scaling group to take it out of service and replace it, with the site serving continuously throughout.
 
 ---
 
@@ -26,10 +26,14 @@ Under test, terminating an application instance by hand left the site serving co
 
 - An RDS PostgreSQL database in the private subnets, deployed Multi-AZ, holding the application’s working data. It is reachable only from the application tier, and not from the internet at all.
 
+- An S3 bucket for uploads, written to by the application instances through an IAM role.
+  No access keys exist anywhere in this project.
+
+- Shell access to the private instances through SSM Session Manager. There is no SSH key
+  pair, no bastion host, and no inbound rule on port 22 anywhere in the design.
+
 ### Not built yet
 
-
-- **S3 uploads bucket** — to allow uploads from any instance, including ones that do not exist yet, with durable and shared storage, reached through the gateway endpoint rather than the NAT gateways. An IAM role attached to the instances lets them write to the bucket without any access keys on the servers.
 
 - **CloudWatch alarms** — to cover what the automation cannot resolve on its own. The load balancer withholds traffic and the Auto Scaling group replaces instances, but neither tells anyone, so without alarms there is potential for silently unresolved issues.
 
@@ -71,7 +75,7 @@ Under test, terminating an application instance by hand left the site serving co
                                                    │ S3 gateway
                                                    ▼ endpoint (free)
                                        ┌─────────────────────────┐
-                                       │  S3 uploads  (PLANNED)  │
+                                       │  S3 uploads             │
                                        └─────────────────────────┘
 ```
 
@@ -91,6 +95,10 @@ The user's connection terminates at the load balancer, which opens its own separ
 
 - **An S3 gateway endpoint.** Free, and it avoids per-gigabyte NAT processing charges on what will be the largest traffic volume in the application.
 
+- **No VPC interface endpoints for Session Manager.** The agent only needs outbound HTTPS,
+  which the NAT gateways already provide. Three interface endpoints would cost roughly $20 a
+  month to replace something already paid for.
+
 ### Security
 
 - **The load balancer listens on port 80, not 443.** I do not have a domain, and therefore no TLS certificate. Stated as a known limitation rather than an oversight.
@@ -99,11 +107,32 @@ The user's connection terminates at the load balancer, which opens its own separ
 
 - **The database security group has no outbound rule at all**, because a database does not need to initiate connections. Least privilege.
 
+- **The instances get their AWS permissions from a role, not from access keys.** A key would
+  have to be written into the user data script, which is in this repository, and it would
+  never expire. The role gives each instance temporary credentials that AWS rotates on its
+  own, fetched from the instance metadata service. boto3 and the AWS CLI find them with no
+  configuration, so nothing in the project stores a credential.
+
+- **The role can write and read objects, and cannot list the bucket.** `PutObject` and
+  `GetObject` act on objects, so the policy names the bucket ARN with `/*` on the end.
+  Listing is a bucket-level action and is deliberately absent — the application has no
+  reason to enumerate the bucket, so it cannot.
+
+- **Shell access is through SSM Session Manager rather than SSH.** The agent on the instance
+  connects outbound to AWS and AWS brokers the session, so administrative access to a private
+  instance needs no inbound path, no key to distribute, and no bastion host to maintain.
+
 ### Compute
 
 - **Auto Scaling group: desired capacity 2, one instance per zone — and the minimum is also 2.** The floor matches the number of Availability Zones rather than the traffic, because a scaling policy optimises for its metric and knows nothing about zones. With a floor of 1 it could scale down to a single instance in a single zone overnight and silently undo the multi-zone design the rest of the architecture pays for.
 
 - **Health check type `ELB`, not the default `EC2`.** The default only asks whether the instance is running, so an instance whose web server had died would be left in service while the load balancer withheld traffic from it — and the Auto Scaling group would report full healthy capacity the whole time.
+
+Tested by stopping the web server rather than terminating the instance: terminating proves
+  nothing, because the instance is gone either way. A running instance that serves nothing is
+  the only case that distinguishes the two settings. The Auto Scaling group's own activity log
+  recorded the reason — "an instance was taken out of service in response to an ELB system
+  health check failure."
 
 - **The AMI comes from a data source, filtered by owner.** A pasted AMI ID is Region-specific and silently ages as Amazon republishes with security patches. Filtering by owner matters because anyone can publish an image with a matching name.
 

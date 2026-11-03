@@ -261,6 +261,9 @@ resource "aws_launch_template" "app" {
   image_id               = data.aws_ami.al2023.id
   instance_type          = "t3.micro"
   vpc_security_group_ids = [aws_security_group.app.id]
+  iam_instance_profile {
+    name = aws_iam_instance_profile.app.name
+  }
   user_data = base64encode(<<-EOF
 #!/bin/bash
 set -e
@@ -317,10 +320,63 @@ resource "aws_db_instance" "three_tier_app_db" {
   db_subnet_group_name   = aws_db_subnet_group.three-tier-app-db-subnets.name
 }
 
-variable "db_password" {
-  description = "Master password for the RDS PostgreSQL instance"
-  type        = string
-  sensitive   = true
+
+resource "aws_s3_bucket" "three_tier_app" {
+  bucket        = "dustin-three-tier-app-83286502"
+  force_destroy = true
+
+  tags = {
+    Name = "three-tier-app"
+
+  }
+}
+resource "aws_s3_bucket_public_access_block" "three_tier_app" {
+  bucket = aws_s3_bucket.three_tier_app.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
+resource "aws_iam_role" "app" {
+  name = "three-tier-app-instance-role"
 
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ssm" {
+  role       = aws_iam_role.app.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy" "s3_uploads" {
+  name = "three-tier-app-s3-uploads"
+  role = aws_iam_role.app.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "s3:PutObject",
+        "s3:GetObject",
+      ]
+      Resource = "${aws_s3_bucket.three_tier_app.arn}/*"
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "app" {
+  name = "three-tier-app-instance-profile"
+  role = aws_iam_role.app.name
+}
