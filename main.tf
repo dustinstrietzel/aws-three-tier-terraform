@@ -267,9 +267,32 @@ resource "aws_launch_template" "app" {
   user_data = base64encode(<<-EOF
 #!/bin/bash
 set -e
-dnf install -y httpd
+
+dnf install -y httpd amazon-cloudwatch-agent
 systemctl enable --now httpd
 echo "<h1>Hello from $(hostname)</h1>" > /var/www/html/index.html
+
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CFG'
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/httpd/access_log",
+            "log_group_name": "${aws_cloudwatch_log_group.three-tier-app.name}",
+            "log_stream_name": "{instance_id}"
+          }
+        ]
+      }
+    }
+  }
+}
+CFG
+
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
 EOF
   )
   tag_specifications {
@@ -442,21 +465,16 @@ resource "aws_cloudwatch_metric_alarm" "three-tier-elb-5xx-alarm" {
   alarm_actions     = [aws_sns_topic.three-tier-app-alerts.arn]
 }
 
+resource "aws_cloudwatch_log_group" "three-tier-app" {
+  name              = "/three-tier-app/httpd/access"
+  retention_in_days = 7
 
-#Budget
-
-resource "aws_budgets_budget" "three-tier-app-budget" {
-  name         = "three-tier-app-budget"
-  budget_type  = "COST"
-  limit_amount = "20"
-  limit_unit   = "USD"
-  time_unit    = "MONTHLY"
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    notification_type          = "FORECASTED"
-    threshold                  = 80
-    threshold_type             = "PERCENTAGE"
-    subscriber_email_addresses = [var.alert_email]
+  tags = {
+    Name = "three-tier-app-log-group"
   }
 }
 
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent" {
+  role       = aws_iam_role.app.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}

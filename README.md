@@ -35,6 +35,13 @@ Under test, stopping the web server on one instance — leaving the instance its
 - Four alarms delivered to email through an SNS topic: sustained unhealthy instances, database free
   storage running low, 5xx responses from the load balancer, and a monthly cost budget.
 
+  - A CloudTrail trail recording all management API activity to its own S3 bucket, with log file
+  validation enabled. It lives in `bootstrap/` and runs continuously.
+
+- The CloudWatch agent on each instance, shipping the web server's access log to a CloudWatch log
+  group with a seven-day retention. The hypervisor cannot see inside the operating system, so
+  anything in a log file needs an agent to report it.
+
 ---
 
 ## Architecture
@@ -120,6 +127,11 @@ The user's connection terminates at the load balancer, which opens its own separ
   connects outbound to AWS and AWS brokers the session, so administrative access to a private
   instance needs no inbound path, no key to distribute, and no bastion host to maintain.
 
+  - **CloudTrail's permission is a bucket policy, not an identity policy.** Every other permission in
+  this project is attached to an identity I control — the instance role. CloudTrail is an AWS
+  service, so there is no role of mine to attach anything to, and the only place left to put the
+  permission is on the bucket itself.
+
 ### Compute
 
 - **Auto Scaling group: desired capacity 2, one instance per zone — and the minimum is also 2.** The floor matches the number of Availability Zones rather than the traffic, because a scaling policy optimises for its metric and knows nothing about zones. With a floor of 1 it could scale down to a single instance in a single zone overnight and silently undo the multi-zone design the rest of the architecture pays for.
@@ -159,6 +171,18 @@ Tested by stopping the web server rather than terminating the instance: terminat
   written into the state file in plain text regardless. That is the concrete reason the state bucket
   is encrypted, versioned and blocked from public access.
 
+  - **`bootstrap/` holds everything account-level and permanent**, not just the state bucket: the cost
+  budget and the CloudTrail trail as well. The main project is the application, and it is built and
+  destroyed constantly. Anything whose job is to watch for problems cannot live there — a budget
+  destroyed every evening cannot catch a stack left running overnight, and a trail that only runs
+  while I am working only records while I am working.
+
+- **The trail writes to its own bucket rather than the state bucket.** The state bucket holds a
+  database password in plaintext, and adding a resource policy to it would mean one more thing to get
+  wrong on the only bucket in the account containing a secret. Their retention needs are also
+  opposite: state is versioned so old versions can be recovered, while trail logs only grow and
+  should eventually expire.
+
 ### Terraform practice
 
 - **`depends_on` on the NAT gateways.** Nothing in a NAT gateway block references the internet gateway, so Terraform's dependency graph has no reason to wait for it. This is the rare case where an explicit dependency is genuinely needed.
@@ -191,6 +215,18 @@ Tested by stopping the web server rather than terminating the instance: terminat
   one Region only, update every six hours, and require billing alerts to be switched on by hand in the
   account settings. A budget needs no console step and can alarm on a forecast rather than waiting until
   the money is already spent.
+
+  - **CloudTrail answers who did what, which is a different question from whether anything is wrong.**
+  An alarm tells me an instance is unhealthy. CloudTrail tells me that at 17:18 the Auto Scaling
+  service called `TerminateInstances`. Neither substitutes for the other.
+
+- **A trail, even though AWS already records the last 90 days for free.** Every account keeps API
+  activity in CloudTrail Event history with no setup at all. The trail does not turn recording on —
+  it makes the record durable past 90 days and keeps it in a bucket I own.
+
+- **The log group is created by Terraform rather than by the agent.** The agent has permission to
+  create its own, and a group it creates defaults to never expiring — so it accumulates storage
+  charges indefinitely and sits outside Terraform, where `destroy` will never find it.
 ---
 
 
